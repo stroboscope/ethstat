@@ -233,6 +233,7 @@ def eth_stat_print
   puts " (#{@hostname})"
   hn = nil
 
+  havelines = false
   eths.each do |dev|
     # first output queues stats, then errors
 
@@ -280,6 +281,7 @@ def eth_stat_print
 	print_value(qst, v)
       end
       puts
+      havelines = true
     end
 
     # output scalar (errors)
@@ -302,9 +304,11 @@ def eth_stat_print
       print_value_unformatted(kst, v)
     end
     puts
+    havelines = true
 
   end
 
+  puts " zero stat from: " + eths.join(', ') unless havelines
 end
 
 @hostname = `hostname -s`.strip
