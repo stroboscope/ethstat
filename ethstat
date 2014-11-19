@@ -13,16 +13,17 @@ require 'pp'
 
 GetoptLong.new(
       ["--help",    "-h", GetoptLong::NO_ARGUMENT],
-      ["--bytes",   "-B", GetoptLong::NO_ARGUMENT],
+      ["--bytes",   "-b", GetoptLong::NO_ARGUMENT],
       ["--errors",  "-e", GetoptLong::NO_ARGUMENT],
       ["--nocolor", "-c", GetoptLong::NO_ARGUMENT]
 ).each do |opt, arg|
     case opt
     when '--help'
-      puts " Show hardware ethernet stat in a table form."
-      puts " All output stats is per second rates"
-      puts "  --bytes  -B  show bytes stat, not just packets"
-      puts "  --errors -e  show only errors stats"
+      puts "ethstat [-options] [seconds]"
+      puts "  Periodically show ethernet stats in a table form."
+      puts "  All output stats is per-second rates.  Options:"
+      puts "    --bytes  -b  show bytes stat, not just packets."
+      puts "    --errors -e  show only errors stats."
       exit 0
     when '--bytes'
       @bytes = true
