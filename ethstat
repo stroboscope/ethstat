@@ -9,24 +9,25 @@ require 'pp'
 
 @interval = 3
 @color = true
+@showall = true
 
 GetoptLong.new(
       ["--help",    "-h", GetoptLong::NO_ARGUMENT],
       ["--bytes",   "-B", GetoptLong::NO_ARGUMENT],
-      ["--all",     "-a", GetoptLong::NO_ARGUMENT],
+      ["--errors",  "-e", GetoptLong::NO_ARGUMENT],
       ["--nocolor", "-c", GetoptLong::NO_ARGUMENT]
 ).each do |opt, arg|
     case opt
     when '--help'
       puts " Show hardware ethernet stat in a table form."
       puts " All output stats is per second rates"
-      puts "  --bytes  show bytes stat, not just packets"
-      puts "  --all    show all stats, not just errors"
+      puts "  --bytes  -B  show bytes stat, not just packets"
+      puts "  --errors -e  show only errors stats"
       exit 0
     when '--bytes'
       @bytes = true
-    when '--all'
-      @showall = true
+    when '--errors'
+      @showall = false
     when '--nocolor'
       @color = false
     end
