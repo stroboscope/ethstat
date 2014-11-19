@@ -1,0 +1,318 @@
+#!/usr/bin/ruby
+# Observe hardware ethernet statistics in readable form.
+# (c) 2014 <abc@telekom.ru>
+# License: GPL.
+
+require 'getoptlong'
+require 'set'
+require 'pp'
+
+@interval = 3
+@color = true
+
+GetoptLong.new(
+      ["--help",    "-h", GetoptLong::NO_ARGUMENT],
+      ["--bytes",   "-B", GetoptLong::NO_ARGUMENT],
+      ["--all",     "-a", GetoptLong::NO_ARGUMENT],
+      ["--nocolor", "-c", GetoptLong::NO_ARGUMENT],
+).each do |opt, arg|
+    case opt
+    when '--help'
+      puts " Show hardware ethernet stat in a table form."
+      puts " All output stats is per second rates"
+      puts "  --bytes  show bytes stat, not just packets"
+      puts "  --all    show all stats, not just errors"
+      exit 0
+    when '--bytes'
+      @bytes = true
+    when '--all'
+      @showall = true
+    when '--nocolor'
+      @color = false
+    end
+end
+if ARGV[0].to_f > 0
+  @interval = ARGV[0].to_f
+end
+
+class Array
+  def sub(older)
+    zip(older).map {|a,b| a - b}
+  end
+  def add!(o)
+    o.each_with_index {|a, i| self[i] += a}
+  end
+  def div(other)
+    if other.kind_of? Array
+      zip(other).map {|a,b| a.to_f / b.to_f rescue 0}
+    else
+      map{|e| e / other rescue 0}
+    end
+  end
+  def mul(m)
+    map{|e| e * m}
+  end
+  def sort_natural
+    sort_by {|e| e.scan(/[a-z]+|\d+/)}
+  end
+  def bubble_up(v)
+    insert(0, delete(v)) if include?(v)
+  end
+end
+
+@st = Hash.new {|h,k| h[k] = Hash.new}
+# [device_name, :queue_stat_name][:tag] => [q0, q2, ... per queue stat]
+@qstats = Hash.new {|h,k| h[k] = Set.new}
+# device_name => [:queue_stat_names...]
+# to list valid queue stats as secondary keys array
+@dstats = Hash.new {|h,k| h[k] = Set.new}
+# device_name => [:other_stat_names...]
+def st_record(key, newvals)
+  oldvals = @st[key][:o] = @st[key][:n]
+  @st[key][:to] = @st[key][:tn]
+  @st[key][:n] = newvals
+  @st[key][:tn] = @now
+  if oldvals
+    @st[key][:t] = @st[key][:tn] - @st[key][:to]	# passed time
+    @st[key][:d] = newvals.sub(oldvals)			# delta value
+    @st[key][:r] = @st[key][:d].div(@st[key][:t])	# rate
+
+    dev, q = key
+    if q.to_s =~ /^[tr]x_queue_/
+      # global list of valid queues
+      @qstats[dev].add(q)
+    else
+      # valid scalars
+      @dstats[dev].add(q)
+    end
+  end
+end
+
+def net_devices_pci
+  Dir['/sys/class/net/*'].reject do |f|
+    !File.symlink?(f) || !(File.readlink(f) =~ %r{devices/pci})
+  end.map {|f| File.basename(f)}
+end
+
+@stq = Hash.new {|h,k| h[k] = Hash.new} # rx/tx queues per eth
+def ethtool_grab_stat(dev = nil)
+  if dev
+    h = Hash.new {|k,v| k[v] = Array.new}
+    t = `ethtool -S #{dev} 2>/dev/null`
+    return if t == ''
+    t.split("\n").map { |e|
+      e.split(':')
+    }.reject { |e|
+      !e[1] # no value
+    }.each { |a,b|
+      a.strip!
+      b = b.strip.to_i
+      if a =~ /^.x_queue_(\d+)_/
+	qt = a.split('_')
+	qnum = qt[2].to_i
+	qt.delete_at(2)
+	qnam = [qt[0], qnum].join('-') # short queue name
+	@stq[dev][qnam] = true
+	qt = qt.join('_').to_sym
+	h[qt][qnum] = b
+      else
+	h[a.to_sym] << b
+      end
+    }
+    h.each_pair {|k,v| st_record([dev, k], v)}
+  else
+    net_devices_pci.each {|e| ethtool_grab_stat(e)}
+    fix_packets_sum
+  end
+end
+
+# sorted list of ethernets
+def st_eths
+  @st.keys.map{|a,b| a}.uniq.sort_natural
+end
+
+# red everything except plain stat
+def colorize_stat(st, txt, val = nil)
+  if st == "bytes" || st == "packets" || val == 0 || !@color
+    txt
+  elsif st =~ /_err|[rt]x_no_|drop|restart|out_of_/
+    "\e[1;31m#{txt}\e[m"
+  else
+    "\e[1;30m#{txt}\e[m"
+  end
+end
+
+def print_value_unformatted(qst, v)
+  unless v
+    # empty cell
+    print " %s" % '-'
+    return
+  end
+  print colorize_stat(qst,
+    if v == 0
+      " %d" % v
+    elsif v < 0.1
+      " %.2f" % v
+    elsif v < 10
+      " %.1f" % v
+    elsif v < 1e6
+      " %d" % v
+    elsif v < 1e8
+      " %dK" % (v / 1e3)
+    elsif v < 1e11
+      " %dM" % (v / 1e6)
+    elsif
+      " %dG" % (v / 1e9)
+    end, v)
+end
+def print_value(qst, v)
+  unless v
+    # empty cell
+    print " %6s" % v
+    return
+  end
+  print colorize_stat(qst,
+    if v == 0
+      " %6d" % v
+    elsif v < 0.1
+      " %6.2f" % v
+    elsif v < 10
+      " %6.1f" % v
+    elsif v < 1e6
+      " %6d" % v
+    elsif v < 1e8
+      " %5dK" % (v / 1e3)
+    elsif v < 1e11
+      " %5dM" % (v / 1e6)
+    elsif
+      " %5dG" % (v / 1e9)
+    end, v)
+end
+
+def fix_packets_sum
+  st_eths.each do |dev|
+    [[:rx_packets, /^rx_.cast_packets$/],
+     [:tx_packets, /^tx_.cast_packets$/]].each do |k, re|
+      unless @dstats[dev].include?(k)
+	# sum rx_ucast_packets + rx_mcast_packets + rx_bcast_packets into rx_packets
+	a = [0]
+	@dstats[dev].grep(re).each do |kst|
+	  a.add!(@st[[dev, kst]][:r])
+	end
+	@st[[dev, k]][:r] = a
+      end
+    end
+  end
+end
+
+def eth_stat_print
+  # output: header, ethN queues, ethN errors, ethN+1...
+  eths = st_eths.sort_natural
+
+  # Calculate and print header
+  # Different eths could have different amount of queues.
+  # Totals will be output on the first column before their (tx/rx) queues.
+  # Also, if there is queue stat that have total (like drops),
+  #   it should be output only once in queues table total column
+  hn = {}
+  eths.each{|e| @stq[e].each_key {|k| hn[k] = true}}
+  hn['rx'] = true
+  hn['tx'] = true
+  cols = {}
+  hn.keys.sort_natural.each_with_index {|e, i| cols[i] = e}
+  # cols: column index to short queue name (like 'tx-1')
+
+  print "%14s:" % @now.strftime('-%H:%M.%S- ')
+  hn.size.times {|i| print " %6s" % cols[i]}
+  puts " (#{@hostname})"
+  hn = nil
+
+  eths.each do |dev|
+    # first output queues stats, then errors
+
+    # in what order we want to output queue stats:
+    #  packets, drops, no bytes, others...
+    ro = @qstats[dev]
+    ro = ro.map{|e| e.to_s.sub(/^[tr]x_queue_/, '')}.uniq
+    ro.bubble_up("drops")
+    ro.bubble_up("packets")
+    ro.bubble_up("bytes")
+    ro.insert(0, "drops")   if !ro.include?("drops")
+    ro.insert(0, "packets") if !ro.include?("packets")
+    ro.insert(0, "bytes")   if !ro.include?("bytes")
+    ro.delete("bytes") unless @bytes
+    # ro: array of queue stats names to output by row
+
+    # output queue stats
+    ro.each do |qst|
+
+      # prepare row with numbers only
+      # we can then skip this row if all values are 0
+      r = []
+
+      cols.each do |cnum, cname|
+	if cname == "rx" || cname == "tx"
+	  xqs = (qst == 'drops')? 'dropped' : qst
+	  qq = "#{cname}_#{xqs}".to_sym
+	  r[cnum] = @st[[dev, qq]][:r][0] rescue nil
+	else
+	  q, n = cname.split('-')
+	  n = n.to_i
+	  qq = "#{q}_queue_#{qst}".to_sym
+	  if @st[[dev, qq]]
+	    r[cnum] = @st[[dev, qq]][:r][n] rescue nil
+	  end
+	end
+      end
+      # skip row if it's empty
+      next if r.map{|e| e.to_i}.reduce(:+) == 0
+
+      # all good, print line
+      print "%5s" % dev
+      print colorize_stat(qst, " %8s:" % qst)
+      r.each do |v|
+	print_value(qst, v)
+      end
+      puts
+    end
+
+    # output scalar (errors)
+    r = [] # [[name, value]...]
+    @dstats[dev].each do |sn|
+      # skip redundant stat
+      next if sn =~ /^(.x_(packets|bytes)|.x_long_byte_count|.x_(.cast|\d.*byte)_packets)$/
+      # skip non-errors
+      next unless sn =~ /_err|[rt]x_no_|drop|restart|out_of_/ || @showall
+      v = @st[[dev, sn]][:r].first
+      r << [sn, v] if v > 0
+    end
+    next if r.empty?
+
+    # all good, print line
+    print "%5s" % dev
+    r.each do |kst, v|
+      print colorize_stat(kst, " %s:" % kst)
+      print_value_unformatted(kst, v)
+    end
+    puts
+
+  end
+
+end
+
+@hostname = `hostname -s`.strip
+
+loop do
+  @now = Time.now
+  ethtool_grab_stat
+  unless @notfirst
+    @notfirst = true
+    sleep [0.5, @interval].min
+    next
+  end
+
+  puts
+  eth_stat_print
+  sleep @interval
+end
+
