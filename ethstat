@@ -14,7 +14,7 @@ GetoptLong.new(
       ["--help",    "-h", GetoptLong::NO_ARGUMENT],
       ["--bytes",   "-B", GetoptLong::NO_ARGUMENT],
       ["--all",     "-a", GetoptLong::NO_ARGUMENT],
-      ["--nocolor", "-c", GetoptLong::NO_ARGUMENT],
+      ["--nocolor", "-c", GetoptLong::NO_ARGUMENT]
 ).each do |opt, arg|
     case opt
     when '--help'
@@ -196,8 +196,8 @@ def fix_packets_sum
       unless @dstats[dev].include?(k)
 	# sum rx_ucast_packets + rx_mcast_packets + rx_bcast_packets into rx_packets
 	a = [0]
-	@dstats[dev].grep(re).each do |kst|
-	  a.add!(@st[[dev, kst]][:r])
+	@dstats[dev].map{|e| e.to_s}.grep(re).each do |kst|
+	  a.add!(@st[[dev, kst.to_sym]][:r])
 	end
 	@st[[dev, k]][:r] = a
       end
@@ -280,9 +280,9 @@ def eth_stat_print
     r = [] # [[name, value]...]
     @dstats[dev].each do |sn|
       # skip redundant stat
-      next if sn =~ /^(.x_(packets|bytes)|.x_long_byte_count|.x_(.cast|\d.*byte)_packets)$/
+      next if sn.to_s =~ /^(.x_(packets|bytes)|.x_long_byte_count|.x_(.cast|\d.*byte)_packets)$/
       # skip non-errors
-      next unless sn =~ /_err|[rt]x_no_|drop|restart|out_of_/ || @showall
+      next unless sn.to_s =~ /_err|[rt]x_no_|drop|restart|out_of_/ || @showall
       v = @st[[dev, sn]][:r].first
       r << [sn, v] if v > 0
     end
