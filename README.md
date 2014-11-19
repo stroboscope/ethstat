@@ -4,9 +4,6 @@ Tool to dynamially observe current ethernet statistics in simple and readable
 form. It reads hardware stat from `ethtool -S` and display in table format (for
 queues), additional line for scalar stats where errors marked with red color.
 
-### Requires
-*ruby* 1.8 or higher.
-
 ### Example output
 ```
    -16:04.34- :     rx   rx-0   rx-1   rx-2   rx-3     tx   tx-0   tx-1   tx-2   tx-3 (gate2)
@@ -16,12 +13,16 @@ queues), additional line for scalar stats where errors marked with red color.
  eth3  packets:  27075   5439   6574   6943   8119  17667      0  17666      0      0
  eth3 csum_err:             0      0    1.9      0
 ```
-All numbers are *per second* rates.
+All numbers are usually packet related *per-second rates*. Thats why you will
+see floating point numbers sometimes.
 
 ### Options
 * `-e` to show only error stats (default is everything, except redundant data).
 * `-b` to show also byte counters (default only packets).
 * `-h` for help.
+
+### Requires
+*ruby* 1.8 or higher.
 
 ### License
 GPL
