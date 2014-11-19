@@ -61,13 +61,20 @@ class Array
   end
 end
 
-@st = Hash.new {|h,k| h[k] = Hash.new}
-# [device_name, :queue_stat_name][:tag] => [q0, q2, ... per queue stat]
-@qstats = Hash.new {|h,k| h[k] = Set.new}
-# device_name => [:queue_stat_names...]
-# to list valid queue stats as secondary keys array
-@dstats = Hash.new {|h,k| h[k] = Set.new}
-# device_name => [:other_stat_names...]
+def stat_reinit
+  @st ||= Hash.new {|h,k| h[k] = Hash.new}
+  # [device_name, :queue_stat_name][:tag] => [q0, q2, ... per queue stat]
+
+  @qstats = Hash.new {|h,k| h[k] = Set.new}
+  # device_name => [:queue_stat_names...]
+  # to list valid queue stats as secondary keys array
+
+  @dstats = Hash.new {|h,k| h[k] = Set.new}
+  # device_name => [:other_stat_names...]
+
+  @stq = Set.new # short queue names
+end
+
 def st_record(key, newvals)
   oldvals = @st[key][:o] = @st[key][:n]
   @st[key][:to] = @st[key][:tn]
@@ -100,7 +107,6 @@ def net_devices_pci
   end.map {|f| File.basename(f)}
 end
 
-@stq = Hash.new {|h,k| h[k] = Hash.new} # rx/tx queues per eth
 def ethtool_grab_stat(dev = nil)
   if dev
     h = Hash.new {|k,v| k[v] = Array.new}
@@ -118,7 +124,7 @@ def ethtool_grab_stat(dev = nil)
 	qnum = qt[2].to_i
 	qt.delete_at(2)
 	qnam = [qt[0], qnum].join('-') # short queue name
-	@stq[dev][qnam] = true
+	@stq.add(qnam)
 	qt = qt.join('_').to_sym
 	h[qt][qnum] = b
       else
@@ -127,6 +133,7 @@ def ethtool_grab_stat(dev = nil)
     }
     h.each_pair {|k,v| st_record([dev, k], v)}
   else
+    stat_reinit
     net_devices_pci.each {|e| ethtool_grab_stat(e)}
     fix_packets_sum
   end
@@ -220,12 +227,11 @@ def eth_stat_print
   # Totals will be output on the first column before their (tx/rx) queues.
   # Also, if there is queue stat that have total (like drops),
   #   it should be output only once in queues table total column
-  hn = {}
-  eths.each{|e| @stq[e].each_key {|k| hn[k] = true}}
-  hn['rx'] = true
-  hn['tx'] = true
+  hn = Set.new(@stq)
+  hn.add('rx')
+  hn.add('tx')
   cols = {}
-  hn.keys.sort_natural.each_with_index {|e, i| cols[i] = e}
+  hn.to_a.sort_natural.each_with_index {|e, i| cols[i] = e}
   # cols: column index to short queue name (like 'tx-1')
 
   print "%14s:" % @now.strftime('-%H:%M.%S- ')
