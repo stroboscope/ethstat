@@ -90,7 +90,12 @@ end
 
 def net_devices_pci
   Dir['/sys/class/net/*'].reject do |f|
-    !File.symlink?(f) || !(File.readlink(f) =~ %r{devices/pci})
+    f += "/device" unless File.symlink?(f)
+    if File.symlink?(f)
+      !(File.readlink(f) =~ %r{devices/pci})
+    else
+      false
+    end
   end.map {|f| File.basename(f)}
 end
 
