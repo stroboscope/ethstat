@@ -286,6 +286,7 @@ def eth_stat_print
     @dstats[dev].each do |sn|
       # skip redundant stat
       next if sn.to_s =~ /^(.x_(packets|bytes)|.x_long_byte_count|.x_(.cast|\d.*byte)_packets)$/
+      next if sn.to_s =~ /^multicast$/ && @dstats[dev].includes?(:rx_multicast)
       # skip non-errors
       next unless sn.to_s =~ /_err|[rt]x_no_|drop|restart|out_of_/ || @showall
       v = @st[[dev, sn]][:r].first
