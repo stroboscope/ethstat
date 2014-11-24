@@ -37,6 +37,12 @@ if ARGV[0].to_f > 0
   @interval = ARGV[0].to_f
 end
 
+class String
+  def to_nat
+    (self =~ /^\d+$/)? self.to_i : self
+  end
+end
+
 class Array
   def sub(older)
     zip(older).map {|a,b| a - b}
@@ -54,8 +60,11 @@ class Array
   def mul(m)
     map{|e| e * m}
   end
+  def to_nat
+    map {|e| e.to_nat}
+  end
   def sort_natural
-    sort_by {|e| e.scan(/[a-z]+|\d+/)}
+    sort_by {|e| e.scan(/[a-z]+|\d+/).to_nat}
   end
   def bubble_up(v)
     insert(0, delete(v)) if include?(v)
