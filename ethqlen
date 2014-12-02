@@ -1,0 +1,40 @@
+#!/usr/bin/ruby
+
+ARGV << '-' if ARGV.empty?
+ARGV.each do |dev|
+  if dev == '-'
+    t = $stdin
+  else
+    t = `ethtool -d #{dev} 2>/dev/null`
+    next if t.empty?
+  end
+  h = Hash.new {|k,v| k[v] = Hash.new}
+  t.each_line do |e|
+    r, v = e.scan(%r{^0x[0-9A-Z]+: ([A-Z0-9]+)\s.*\s(0x[0-9A-Z]+)$}).flatten
+    next unless r =~ %r{^[TR]D(H|T|LEN)\d+$}
+    dr = r[/^./].to_sym  # direction
+    qn = r[/\d+/].to_i   # queue number
+    rn = r[/^.D([HTL])/, 1].to_sym # register short name (H, T, L)
+    v = v.hex
+    v /= 16 if rn == :L # descriptor len is always 16 (bytes)
+    x = h[[dr, qn]] ||= {}
+    x[rn] = v
+  end
+  # calculate queue lengths
+  z = Hash.new {|k,v| k[v] = Array.new}
+  h.each do |k, v|
+    dr, qn = k
+    next if v[:L] == 0
+    k = (dr == :R)? "rx" : "tx"
+    ks = (k + "_queue_len").to_sym
+    kz = (k + "_queue_size").to_sym
+    b = v[:T] - v[:H]
+    b += v[:L] if b < 0
+    z[ks][qn.to_i] = b
+    z[kz][qn.to_i] = v[:L]
+  end
+  z.each do |k,v|
+    print "%s %-14s: " % [dev, k]
+    p v
+  end
+end

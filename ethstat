@@ -178,7 +178,6 @@ def ethtool_grab_regs(dev = nil)
     x = h[[dr, qn]] ||= {}
     x[rn] = v
   end
-  z = {}
   # calculate queue lengths
   y = Hash.new {|k,v| k[v] = Array.new}
   h.each do |k, v|
