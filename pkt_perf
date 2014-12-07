@@ -1,0 +1,73 @@
+#!/usr/bin/ruby
+
+require 'tmpdir'
+require 'pp'
+
+@period = 0.1
+@period = ARGV.pop.to_f if ARGV[0].to_f > 0
+
+def perf_sample
+  @ots = @ts
+  @ts = Time.now
+
+  td = Dir.mktmpdir('perf')
+  fn = td + "/perf.data"
+  `perf record -a -e net:'*' -o #{fn} sleep #{@period} 2>&1`
+  perf = `perf script -i #{fn}`
+  FileUtils.remove_entry_secure(td)
+  perf
+end
+
+$stderr.puts "Sampling..."
+perf = perf_sample
+# "         swapper     0 [000] 412749.254038: net:netif_receive_skb: dev=eth1 skbaddr=0xffff880622670c00 len=52\n"
+# "         swapper     0 [000] 412749.254070: net:net_dev_xmit: dev=eth3 skbaddr=0xffff880622670c00 len=66 rc=0\n"
+
+st  = {} # time
+sp  = {} # path
+stp = {} # combined
+$stderr.puts "Parsing..."
+netif_receive_skb = 0
+net_dev_xmit = 0
+perf.each_line do |li|
+  cpu, ts, tracepoint, arg = li.scan(/\[(\d{3})\] (\d+\.\d+): (\S+): (.*)$/)[0]
+  cpu = cpu.to_i
+  ts  = ts.to_f
+  arg = Hash[arg.split(" ").map{|e| e.split('=')}]
+  skbaddr = arg["skbaddr"]
+  dev = arg["dev"]
+  next unless skbaddr && dev
+  case tracepoint
+  when "net:netif_receive_skb"
+    st[skbaddr] = ts
+    sp[skbaddr] = [dev]
+    netif_receive_skb += 1
+  when "net:net_dev_xmit"
+    if st[skbaddr]
+      net_dev_xmit += 1
+      path = sp[skbaddr] << dev
+      dt = (ts - st[skbaddr]).round(6)
+      stp[path] ||= []
+      stp[path] << dt
+      st.delete(skbaddr)
+      sp.delete(skbaddr)
+    end
+  end
+end
+$stderr.puts [:netif_receive_skb, netif_receive_skb].join(':')
+$stderr.puts [:net_dev_xmit, net_dev_xmit].join(':')
+$stderr.puts stp.size
+
+t = {}
+stp.each do |k, v|
+  #t[v] << k.join('-')
+  v.each do |td|
+    t[td] ||= []
+    t[td] << k[0] + '-' + k[-1]
+  end
+end
+t.sort.each do |v, k|
+  k.size.times {
+    puts "%f: %s" % [v, k.uniq.sort.join(' ')]
+  }
+end
