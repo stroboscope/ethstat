@@ -17,6 +17,12 @@ def perf_sample
   FileUtils.remove_entry_secure(td)
   perf
 end
+class Float
+  def precision(pre)
+    mult = 10 ** pre
+    (self * mult).round.to_f / mult
+  end
+end
 
 $stderr.puts "Sampling..."
 perf = perf_sample
@@ -30,7 +36,8 @@ $stderr.puts "Parsing..."
 netif_receive_skb = 0
 net_dev_xmit = 0
 perf.each_line do |li|
-  cpu, ts, tracepoint, arg = li.scan(/\[(\d{3})\] (\d+\.\d+): (\S+): (.*)$/)[0]
+  cpu, ts, tracepoint, arg = li.scan(/\[(\d{3})\] (\d+\.\d+): (?:net:)?(\S+): (.*)$/)[0]
+  next unless arg
   cpu = cpu.to_i
   ts  = ts.to_f
   arg = Hash[arg.split(" ").map{|e| e.split('=')}]
@@ -38,15 +45,15 @@ perf.each_line do |li|
   dev = arg["dev"]
   next unless skbaddr && dev
   case tracepoint
-  when "net:netif_receive_skb"
+  when "netif_receive_skb"
     st[skbaddr] = ts
     sp[skbaddr] = [dev]
     netif_receive_skb += 1
-  when "net:net_dev_xmit"
+  when "net_dev_xmit"
     if st[skbaddr]
       net_dev_xmit += 1
       path = sp[skbaddr] << dev
-      dt = (ts - st[skbaddr]).round(6)
+      dt = (ts - st[skbaddr]).precision(6)
       stp[path] ||= []
       stp[path] << dt
       st.delete(skbaddr)
