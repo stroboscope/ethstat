@@ -1,0 +1,128 @@
+#!/usr/bin/ruby
+# Observe softnet_stat statistics in readable form.
+# (c) 2014 <abc@telekom.ru>
+# License: GPL.
+
+require 'getoptlong'
+@delay = 5
+@color = true
+@color = @color && $stdout.tty?
+GetoptLong.new(
+  ["--help", "-h", GetoptLong::NO_ARGUMENT]
+).each do |opt, arg|
+  case opt
+  when '--help'
+    puts "softnet_stat [--help] [seconds]"
+    puts "  Periodically show softnet_stat per-second packet rates (pps)."
+    puts "  Columns:"
+    puts "    cpu        softirq packet processing at this cpu;"
+    puts "    packets    rx packet _processing_ rate, could be accounted"
+    puts "                multiple times per packet if it's processed multiple"
+    puts "                times (for example due to vlan encapsulation);"
+    puts "    dropped    packets dropped due to backlog being full or"
+    puts "                flow_limit is triggered;"
+    puts "                (sysctl net.core.netdev_max_backlog)"
+    puts "    squeeze    times softirq is breaked due to netdev_budget is"
+    puts "               exceeded or time slice (2 jiffies) is passed,"
+    puts "               but packet is not dropped;"
+    puts "                (sysctl net.core.netdev_budget)"
+    puts "    collision  times xmit got NETDEV_TX_LOCKED;"
+    puts "    rps        times RPS is triggered from irq handler;"
+    puts "    flowlimit  packets dropped due to flow_limit." 
+    puts "                (sysctl net.core.flow_limit_cpu_bitmap)"
+    puts "                (sysctl net.core.flow_limit_table_len)"
+    exit 0
+  end
+end
+@delay = ARGV.shift.to_f if ARGV[0].to_f > 0
+
+#   seq_printf(seq,
+#       "%08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x\n",
+#       sd->processed, sd->dropped, sd->time_squeeze, 0,
+#       0, 0, 0, 0, /* was fastroute */
+#       sd->cpu_collision, sd->received_rps, flow_limit_count);
+def proc_softnet_stat
+  @ost = @st
+  @ots = @ts
+  @st = []
+  @ts = Time.now
+
+  IO.read("/proc/net/softnet_stat") \
+    .split("\n") \
+    .each_with_index do |li, cpu|
+      x = li.split(" ").map{|e| e.hex}
+      @st[cpu] = x
+  end
+  @st
+end
+class Array
+  def apply(o, sym)
+    zip(o).map do |a, b|
+      if a.kind_of? Array
+	a.apply(b, sym)
+      else
+	a.send(sym, b)
+      end
+    end
+  end
+  def sub(o)
+    apply(o, :-)
+  end
+  def add(o)
+    apply(o, :+)
+  end
+  def unwrap
+    self.map do |e|
+      if e.kind_of? Array
+	e.unwrap
+      else
+	(e < 0)? e + 0x100000000 : e
+      end
+    end
+  end
+end
+
+def format_color(h, e)
+  return "%8d" % e unless @color && e > 0
+  case h.to_s
+  when /drop/, /flowlim/
+    "\033[1;31m%8d\033[m" % e # red
+  when /squeez/, /collis/
+    "\033[1;34m%8d\033[m" % e # blue
+  else
+    "%8d" % e
+  end
+end
+
+def print_softnet_stat
+  return unless @ost && @st
+  x = @st.sub(@ost).unwrap
+  c_size = @st.size.to_s.size
+  hdr = [:packets, :dropped, :squeeze, nil, nil, nil, nil, nil, :collisi, :rps, :flowlim]
+  hdr.slice!(@st[0].size..-1)
+
+  # header
+  print "%*s: " % [4 + c_size, "cpu"]
+  print hdr.reject{|e| !e}.map{|e| "%8s" % e}.join
+  puts " (#{@hostname}@#{@ts.strftime('%H:%M.%S')})"
+
+  # data
+  td = @ts - @ots
+  x.each_with_index do |v, c|
+    print "%*s: " % [4 + c_size, "cpu%0*d" % [c_size, c]]
+    puts hdr.zip(v).reject{|h, v| !h}.map{|h, e| format_color(h, e.to_f / td)}.join
+  end
+  t = Array.new(@st[0].size, 0)
+  x.each {|v| t = t.add(v)}
+  print "%-*s: " % [4 + c_size, "total"]
+  puts hdr.zip(t).reject{|h, v| !h}.map{|h, e| format_color(h, e.to_f / td)}.join
+end
+
+@hostname = `hostname -s`.strip
+proc_softnet_stat
+sleep [0.5, @delay].min
+loop do
+  proc_softnet_stat
+  print_softnet_stat
+  sleep @delay
+end
