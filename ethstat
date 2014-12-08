@@ -16,7 +16,7 @@ GetoptLong.new(
       ["--help",    "-h", GetoptLong::NO_ARGUMENT],
       ["--bytes",   "-b", GetoptLong::NO_ARGUMENT],
       ["--errors",  "-e", GetoptLong::NO_ARGUMENT],
-      ["--nocolor", "-c", GetoptLong::NO_ARGUMENT],
+      ["--nocolor", "-C", GetoptLong::NO_ARGUMENT],
       ["--qlen",    "-q", GetoptLong::NO_ARGUMENT]
 ).each do |opt, arg|
     case opt
@@ -24,8 +24,10 @@ GetoptLong.new(
       puts "ethstat [-options] [seconds]"
       puts "  Periodically show ethernet stats in a table form."
       puts "  All output stats is per-second rates.  Options:"
-      puts "    --bytes  -b  show bytes stat, not just packets."
-      puts "    --errors -e  show only errors stats."
+      puts "    --bytes   -b  show bytes stat, not just packets."
+      puts "    --errors  -e  show only errors stats."
+      puts "    --nocolor -C  disable showing colors."
+      puts "    --qlen    -q  disable showing active queue lengths."
       exit 0
     when '--bytes'
       @bytes = true
@@ -169,24 +171,26 @@ def ethtool_grab_regs(dev = nil)
   t.split("\n").map do |e|
     r, v = e.scan(%r{^0x[0-9A-Z]+: ([A-Z0-9]+)\s.*\s(0x[0-9A-Z]+)$}).flatten
     next unless r =~ %r{^[TR]D(H|T|LEN)\d+$}
-    dr = r[/^./].to_sym	 # direction
-    qn = r[/\d+/].to_i	 # queue number
-    rn = r[/^.D([HTL])/, 1].to_sym # register short name (H, T, L)
-    v = v.hex
+    dir = r[/^./].to_sym # direction
+    qn  = r[/\d+/].to_i	 # queue number
+    rn  = r[/^.D([HTL])/, 1].to_sym # register short name (H, T, L)
+    v   = v.hex
 
     v /= 16 if rn == :L # descriptor len is always 16 (bytes)
-    x = h[[dr, qn]] ||= {}
+    x = h[[dir, qn]] ||= {}
     x[rn] = v
   end
   # calculate queue lengths
   y = Hash.new {|k,v| k[v] = Array.new}
   h.each do |k, v|
-    dr, qn = k
+    dir, qn = k
     next if v[:L] == 0
-    k = (dr == :R)? "rx" : "tx"
+    k = (dir == :R)? "rx" : "tx"
     k = (k + "_queue_qlen").to_sym
     b = v[:T] - v[:H]
     b += v[:L] if b < 0
+    # make receive queue negative
+    b = b + 1 - v[:L] if dir == :R
     y[k][qn.to_i] = b
   end
   y.each_pair {|k,v| st_record([dev, k], v, :norate)}
